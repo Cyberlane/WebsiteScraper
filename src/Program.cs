@@ -3,9 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Text;
-using System.Threading.Tasks;
-using System.Xml.Linq;
 
 namespace WebsiteScraper
 {
@@ -45,7 +42,7 @@ namespace WebsiteScraper
 
         static void FetchUri(Uri uri)
         {
-            Console.WriteLine("Fetching: " + uri);
+            Console.WriteLine($"Fetching: {uri}");
             var httpClient = new HttpClient();
             var urlParser = new UrlParser();
 
