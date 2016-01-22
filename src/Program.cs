@@ -39,6 +39,8 @@ namespace WebsiteScraper
 
             Console.WriteLine();
             Console.WriteLine($"Completed downloading website: {websiteUri.Host}");
+            Console.WriteLine($" > {ProcessedList.Count} files downloaded");
+            Console.WriteLine(" > Press any key to exit");
             Console.ReadKey();
         }
 
