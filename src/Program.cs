@@ -1,14 +1,16 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using CsQuery.ExtensionMethods.Internal;
 
 namespace WebsiteScraper
 {
     class Program
     {
-        static Dictionary<Uri, bool> _resources = new Dictionary<Uri, bool>();
+        static ConcurrentDictionary<Uri, DownloadStatus> _resources = new ConcurrentDictionary<Uri, DownloadStatus>();
 
         static void Main(string[] args)
         {
@@ -21,17 +23,17 @@ namespace WebsiteScraper
             {
                 Directory.CreateDirectory(websiteUri.Host);
             }
-            _resources.Add(websiteUri, false);
+            _resources.TryAdd(websiteUri, DownloadStatus.Pending);
 
-            while (_resources.Any())
+            while (_resources.All(x => x.Value != DownloadStatus.Complete))
             {
-                var next = _resources.FirstOrDefault(x => !x.Value);
+                var next = _resources.FirstOrDefault(x => x.Value == DownloadStatus.Pending);
                 if (next.Key == null)
                 {
                     continue;
                 }
 
-                _resources[next.Key] = true;
+                _resources[next.Key] = DownloadStatus.Downloading;
                 FetchUri(next.Key);
             }
 
@@ -45,16 +47,31 @@ namespace WebsiteScraper
             Console.WriteLine($"Fetching: {uri}");
             var httpClient = new HttpClient();
             var urlParser = new UrlParser();
+            var parser = new Parser();
 
             httpClient.GetAsync(uri).ContinueWith(request =>
             {
                 var response = request.Result;
-                response.EnsureSuccessStatusCode();
+                try
+                {
+                    response.EnsureSuccessStatusCode();
+                }
+                catch (HttpRequestException)
+                {
+                    Console.WriteLine($"Error '{response.ReasonPhrase}' when trying to fetch: {uri}");
+                    _resources[uri] = DownloadStatus.Error;
+                    return;
+                }
+
                 var urlResults = urlParser.Parse(uri);
                 var folder = CreateDirectories(urlResults.Folders, uri.Host);
                 var filePath = Path.Combine(folder, urlResults.Filename);
 
-                if (response.Content.Headers.ContentType.MediaType == "text/html")
+                if (filePath == uri.Host)
+                {
+                    filePath = Path.Combine(filePath, "index.html");
+                }
+                else if (response.Content.Headers.ContentType.MediaType == "text/html")
                 {
                     filePath += ".html";
                 }
@@ -62,13 +79,26 @@ namespace WebsiteScraper
                 response.Content.ReadAsFileAsync(filePath, false).ContinueWith(readTask =>
                 {
                     Console.WriteLine($"Download Complete: {uri}");
-                    _resources.Remove(uri);
+
+                    if (response.Content.Headers.ContentType.MediaType == "text/html")
+                    {
+                        var parseResults = parser.Parse(filePath, href => href.StartsWith(uri.AbsoluteUri));
+                        var resources = parseResults.Resources.Where(x => !_resources.ContainsKey(x));
+                        _resources.AddRange(resources.Select(x => new KeyValuePair<Uri, DownloadStatus>(x, DownloadStatus.Pending)));
+                    }
+
+                    _resources[uri] = DownloadStatus.Complete;
                 });
             });
         }
 
         static string CreateDirectories(string[] folders, string parentFolder = null)
         {
+            if (folders.Length == 0)
+            {
+                return parentFolder;
+            }
+
             var folder = folders.First();
             if (parentFolder != null)
             {
@@ -123,5 +153,13 @@ namespace WebsiteScraper
                 Console.WriteLine("Error: Prefix your URL with HTTP:// or HTTPS://");
             }
         }
+    }
+
+    public enum DownloadStatus
+    {
+        Pending = 0,
+        Downloading = 1,
+        Complete = 2,
+        Error = 3
     }
 }
