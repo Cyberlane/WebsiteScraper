@@ -4,13 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using CsQuery.ExtensionMethods.Internal;
 
 namespace WebsiteScraper
 {
     class Program
     {
-        static ConcurrentDictionary<Uri, DownloadStatus> _resources = new ConcurrentDictionary<Uri, DownloadStatus>();
+        static readonly ConcurrentQueue<Uri> Queue = new ConcurrentQueue<Uri>();
+        static readonly List<Uri> ProcessedList = new List<Uri>();
 
         static void Main(string[] args)
         {
@@ -23,18 +23,16 @@ namespace WebsiteScraper
             {
                 Directory.CreateDirectory(websiteUri.Host);
             }
-            _resources.TryAdd(websiteUri, DownloadStatus.Pending);
+            Queue.Enqueue(websiteUri);
 
-            while (_resources.All(x => x.Value != DownloadStatus.Complete))
+            while (Queue.Any())
             {
-                var next = _resources.FirstOrDefault(x => x.Value == DownloadStatus.Pending);
-                if (next.Key == null)
+                Uri nextUri;
+                if (Queue.TryDequeue(out nextUri))
                 {
-                    continue;
+                    ProcessedList.Add(nextUri);
+                    FetchUri(nextUri);
                 }
-
-                _resources[next.Key] = DownloadStatus.Downloading;
-                FetchUri(next.Key);
             }
 
             Console.WriteLine();
@@ -42,54 +40,60 @@ namespace WebsiteScraper
             Console.ReadKey();
         }
 
-        static void FetchUri(Uri uri)
+        static async void FetchUri(Uri uri)
         {
             Console.WriteLine($"Fetching: {uri}");
             var httpClient = new HttpClient();
             var urlParser = new UrlParser();
             var parser = new Parser();
 
-            httpClient.GetAsync(uri).ContinueWith(request =>
+            var response = await httpClient.GetAsync(uri);
+
+            try
             {
-                var response = request.Result;
-                try
+                response.EnsureSuccessStatusCode();
+            }
+            catch (HttpRequestException)
+            {
+                Console.WriteLine($"Error '{response.ReasonPhrase}' when trying to fetch: {uri}");
+                return;
+            }
+
+            var urlResults = urlParser.Parse(uri);
+            var folder = CreateDirectories(urlResults.Folders, uri.Host);
+            var filePath = Path.Combine(folder, urlResults.Filename);
+
+            if (filePath == uri.Host)
+            {
+                filePath = Path.Combine(filePath, "index.html");
+            }
+            else if (response.Content.Headers.ContentType.MediaType == "text/html")
+            {
+                filePath += ".html";
+            }
+
+            FileStream stream = null;
+            try
+            {
+                stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await response.Content.CopyToAsync(stream);
+            }
+            catch
+            {
+                stream?.Close();
+            }
+
+            Console.WriteLine($"Download Complete: {uri}");
+
+            if (response.Content.Headers.ContentType.MediaType == "text/html")
+            {
+                var parseResults = parser.Parse(filePath, href => href.StartsWith(uri.AbsoluteUri));
+                var resources = parseResults.Resources.Where(x => !ProcessedList.Contains(x) && !Queue.Contains(x));
+                foreach (var newUri in resources)
                 {
-                    response.EnsureSuccessStatusCode();
+                    Queue.Enqueue(newUri);
                 }
-                catch (HttpRequestException)
-                {
-                    Console.WriteLine($"Error '{response.ReasonPhrase}' when trying to fetch: {uri}");
-                    _resources[uri] = DownloadStatus.Error;
-                    return;
-                }
-
-                var urlResults = urlParser.Parse(uri);
-                var folder = CreateDirectories(urlResults.Folders, uri.Host);
-                var filePath = Path.Combine(folder, urlResults.Filename);
-
-                if (filePath == uri.Host)
-                {
-                    filePath = Path.Combine(filePath, "index.html");
-                }
-                else if (response.Content.Headers.ContentType.MediaType == "text/html")
-                {
-                    filePath += ".html";
-                }
-
-                response.Content.ReadAsFileAsync(filePath, false).ContinueWith(readTask =>
-                {
-                    Console.WriteLine($"Download Complete: {uri}");
-
-                    if (response.Content.Headers.ContentType.MediaType == "text/html")
-                    {
-                        var parseResults = parser.Parse(filePath, href => href.StartsWith(uri.AbsoluteUri));
-                        var resources = parseResults.Resources.Where(x => !_resources.ContainsKey(x));
-                        _resources.AddRange(resources.Select(x => new KeyValuePair<Uri, DownloadStatus>(x, DownloadStatus.Pending)));
-                    }
-
-                    _resources[uri] = DownloadStatus.Complete;
-                });
-            });
+            }
         }
 
         static string CreateDirectories(string[] folders, string parentFolder = null)
