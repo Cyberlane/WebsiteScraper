@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace WebsiteScraper
 {
@@ -11,7 +12,7 @@ namespace WebsiteScraper
     {
         static readonly ConcurrentQueue<Uri> Queue = new ConcurrentQueue<Uri>();
         static readonly List<Uri> ProcessedList = new List<Uri>();
-        private static int InProgress = 0;
+        private static int _inProgress = 0;
 
         static void Main(string[] args)
         {
@@ -26,12 +27,12 @@ namespace WebsiteScraper
             }
             Queue.Enqueue(websiteUri);
 
-            while (Queue.Any() || InProgress > 0)
+            while (Queue.Any() || _inProgress > 0)
             {
                 Uri nextUri;
                 if (Queue.TryDequeue(out nextUri))
                 {
-                    InProgress++;
+                    _inProgress++;
                     ProcessedList.Add(nextUri);
                     FetchUri(nextUri);
                 }
@@ -60,7 +61,7 @@ namespace WebsiteScraper
             catch (HttpRequestException)
             {
                 Console.WriteLine($"Error '{response.ReasonPhrase}' when trying to fetch: {uri}");
-                InProgress--;
+                _inProgress--;
                 return;
             }
 
@@ -73,23 +74,45 @@ namespace WebsiteScraper
                 filePath = Path.Combine(filePath, "index");
             }
 
+            filePath = CleanupFileExtensions(response, filePath);
+
+            await WriteToDisk(response, uri, filePath);
+
+            Console.WriteLine($"Download Complete: {uri}");
+
+            if (response.Content.Headers.ContentType.MediaType == "text/html")
+            {
+                var parseResults = parser.Parse(filePath, href => href.StartsWith(uri.AbsoluteUri));
+                var resources = parseResults.Resources.Where(x => !ProcessedList.Contains(x) && !Queue.Contains(x));
+                foreach (var newUri in resources)
+                {
+                    Queue.Enqueue(newUri);
+                }
+            }
+
+            _inProgress--;
+        }
+
+        static string CleanupFileExtensions(HttpResponseMessage response, string filePath)
+        {
             if (!Path.HasExtension(filePath))
             {
                 switch (response.Content.Headers.ContentType.MediaType)
                 {
                     case "text/html":
-                        filePath += ".html";
-                        break;
+                        return filePath + ".html";
                     case "application/rss+xml":
-                        filePath += ".xml";
-                        break;
+                        return filePath + ".xml";
                     case "application/json":
-                        filePath += ".json";
-                        break;
+                        return filePath + ".json";
                 }
             }
 
+            return filePath;
+        }
 
+        static async Task WriteToDisk(HttpResponseMessage response, Uri uri, string filePath)
+        {
             FileStream stream = null;
             try
             {
@@ -106,19 +129,6 @@ namespace WebsiteScraper
                 stream?.Close();
             }
 
-            Console.WriteLine($"Download Complete: {uri}");
-
-            if (response.Content.Headers.ContentType.MediaType == "text/html")
-            {
-                var parseResults = parser.Parse(filePath, href => href.StartsWith(uri.AbsoluteUri));
-                var resources = parseResults.Resources.Where(x => !ProcessedList.Contains(x) && !Queue.Contains(x));
-                foreach (var newUri in resources)
-                {
-                    Queue.Enqueue(newUri);
-                }
-            }
-
-            InProgress--;
         }
 
         static string CreateDirectories(string[] folders, string parentFolder = null)
