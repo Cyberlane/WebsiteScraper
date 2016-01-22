@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using CsQuery;
@@ -19,15 +20,32 @@ namespace WebsiteScraper
             }
 
             var cq = CQ.Create(content);
-            var results = cq.Find("[href]").Selection
+            var hrefResults = cq.Find("[href]").Selection
                 .Select(x => x.Attributes["href"])
                 .Distinct()
                 .Where(validator)
                 .Select(x => new Uri(x));
 
+            var srcResults = cq.Find("[src]").Selection
+                .Select(x => x.Attributes["src"])
+                .Distinct()
+                .Where(validator)
+                .Select(x => new Uri(x));
+
+            var metaImage = cq.Find("meta[og:image]").Selection
+                .Select(x => x.Attributes["content"])
+                .Distinct()
+                .Where(validator)
+                .Select(x => new Uri(x));
+
+            var resources = new List<Uri>();
+            resources.AddRange(hrefResults);
+            resources.AddRange(srcResults);
+            resources.AddRange(metaImage);
+
             return new ParseResult
             {
-                Resources = results
+                Resources = resources
             };
         }
     }
