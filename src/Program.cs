@@ -68,12 +68,25 @@ namespace WebsiteScraper
 
             if (filePath == uri.Host)
             {
-                filePath = Path.Combine(filePath, "index.html");
+                filePath = Path.Combine(filePath, "index");
             }
-            else if (response.Content.Headers.ContentType.MediaType == "text/html")
+
+            if (!Path.HasExtension(filePath))
             {
-                filePath += ".html";
+                switch (response.Content.Headers.ContentType.MediaType)
+                {
+                    case "text/html":
+                        filePath += ".html";
+                        break;
+                    case "application/rss+xml":
+                        filePath += ".xml";
+                        break;
+                    case "application/json":
+                        filePath += ".json";
+                        break;
+                }
             }
+
 
             FileStream stream = null;
             try
