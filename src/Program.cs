@@ -11,6 +11,7 @@ namespace WebsiteScraper
     {
         static readonly ConcurrentQueue<Uri> Queue = new ConcurrentQueue<Uri>();
         static readonly List<Uri> ProcessedList = new List<Uri>();
+        private static int InProgress = 0;
 
         static void Main(string[] args)
         {
@@ -25,11 +26,12 @@ namespace WebsiteScraper
             }
             Queue.Enqueue(websiteUri);
 
-            while (Queue.Any())
+            while (Queue.Any() || InProgress > 0)
             {
                 Uri nextUri;
                 if (Queue.TryDequeue(out nextUri))
                 {
+                    InProgress++;
                     ProcessedList.Add(nextUri);
                     FetchUri(nextUri);
                 }
@@ -56,6 +58,7 @@ namespace WebsiteScraper
             catch (HttpRequestException)
             {
                 Console.WriteLine($"Error '{response.ReasonPhrase}' when trying to fetch: {uri}");
+                InProgress--;
                 return;
             }
 
@@ -77,8 +80,13 @@ namespace WebsiteScraper
             {
                 stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
                 await response.Content.CopyToAsync(stream);
+
             }
-            catch
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error '{ex.Message}' when trying to fetch: {uri}");
+            }
+            finally
             {
                 stream?.Close();
             }
@@ -94,6 +102,8 @@ namespace WebsiteScraper
                     Queue.Enqueue(newUri);
                 }
             }
+
+            InProgress--;
         }
 
         static string CreateDirectories(string[] folders, string parentFolder = null)

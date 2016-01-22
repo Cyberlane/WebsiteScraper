@@ -21,8 +21,8 @@ namespace WebsiteScraper
             var cq = CQ.Create(content);
             var results = cq.Find("[href]").Selection
                 .Select(x => x.Attributes["href"])
-                .Where(validator)
                 .Distinct()
+                .Where(validator)
                 .Select(x => new Uri(x));
 
             return new ParseResult
