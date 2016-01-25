@@ -10,6 +10,7 @@ namespace WebsiteScraper
 {
     class Program
     {
+        //why is some private and others not, why are fields start with uppercase and others underscore :)
         static readonly ConcurrentQueue<Uri> Queue = new ConcurrentQueue<Uri>();
         static readonly List<Uri> ProcessedList = new List<Uri>();
         private static int _inProgress = 0;
@@ -26,7 +27,8 @@ namespace WebsiteScraper
                 Directory.CreateDirectory(websiteUri.Host);
             }
             Queue.Enqueue(websiteUri);
-
+            
+            //Could use a BlockingCollection here but no real difference I guess
             while (Queue.Any() || _inProgress > 0)
             {
                 Uri nextUri;
@@ -34,6 +36,7 @@ namespace WebsiteScraper
                 {
                     _inProgress++;
                     ProcessedList.Add(nextUri);
+                    //Question for you - this is method is async but has no await before it. What will happen?
                     FetchUri(nextUri);
                 }
             }
@@ -150,6 +153,7 @@ namespace WebsiteScraper
                 Directory.CreateDirectory(folder);
             }
 
+            //No need for ToArray and Length cast. Could have used if (remainingFolers.Any())
             var remainingFolders = folders.Skip(1).ToArray();
             if (remainingFolders.Length > 0)
             {
